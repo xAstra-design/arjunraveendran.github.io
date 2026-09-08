@@ -1,0 +1,10 @@
+{
+  "name": "arjun-creative-engineer-portfolio",
+  "private": true,
+  "version": "3.0.0",
+  "description": "The Pathfinder: a game-led portfolio with original world artwork and a playable 3D adventure.",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node --check script.js && node --check content.js && node --check game.js && node check-game.mjs && node check-game-runtime.mjs"
+  }
+}

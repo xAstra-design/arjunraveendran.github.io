@@ -1,0 +1,33 @@
+/* Bounded, reusable combat effects. No image assets or per-frame GPU allocations. */
+(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory;else root.ArchiveFX=factory;})(typeof globalThis!=='undefined'?globalThis:this,function(THREE,scene,avatar,low){
+  const color=n=>new THREE.Color(n).convertSRGBToLinear(),samples=[],maxSamples=14;
+  const geometry=new THREE.BufferGeometry(),positions=new Float32Array((maxSamples-1)*18),colors=new Float32Array(positions.length);
+  geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.BufferAttribute(colors,3));geometry.setDrawRange(0,0);
+  const ribbon=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({vertexColors:true,transparent:true,opacity:.5,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));ribbon.frustumCulled=false;scene.add(ribbon);
+  const sources=[];avatar.g.traverse(o=>{if(o.isMesh)sources.push(o);});let ghostIndex=0,ghostTimer=0;
+  const ghosts=Array.from({length:low?2:4},()=>{const group=new THREE.Group(),mat=new THREE.MeshBasicMaterial({color:color(0x56cfe2),transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending});group.visible=false;const meshes=sources.map(o=>{const m=new THREE.Mesh(o.geometry,mat);m.matrixAutoUpdate=false;group.add(m);return m;});scene.add(group);return {group,mat,meshes,life:0};});
+  const vertex='varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}';
+  const fragment=`varying vec2 vUv;uniform float age;uniform float seed;uniform float smoke;
+  float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+  float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.)),f.x),f.y);}
+  void main(){vec2 p=vUv*2.-1.;float n=noise(vUv*5.+vec2(seed,-age*5.));float n2=noise(vUv*11.+vec2(-age*2.,seed));float shape=1.-length(p*vec2(1.,.8));float edge=smoothstep(.02,.42,shape+(n-.5)*.55);float fade=smoothstep(0.,.1,age)*(1.-smoothstep(.38,1.,age));float heat=clamp((1.-vUv.y)*.8+n*.4-age*.5,0.,1.);vec3 flame=mix(vec3(.34,.018,.004),vec3(1.,.19,.008),heat);flame=mix(flame,vec3(1.,.58,.075),smoothstep(.65,1.,heat));vec3 soot=mix(vec3(.025,.035,.045),vec3(.1,.105,.11),n);gl_FragColor=vec4(mix(flame,soot,smoke),edge*fade*mix(.86,.32,smoke)*( .7+n2*.3));}`;
+  const plane=new THREE.PlaneGeometry(2,2),flames=Array.from({length:low?26:44},(_,i)=>{const mat=new THREE.ShaderMaterial({uniforms:{age:{value:1},seed:{value:i*2.73},smoke:{value:i%4===0?1:0}},vertexShader:vertex,fragmentShader:fragment,transparent:true,depthWrite:false,side:THREE.DoubleSide});const mesh=new THREE.Mesh(plane,mat);mesh.visible=false;scene.add(mesh);return {mesh,mat,i,life:0,maxLife:1,angle:0,radius:0,size:1,smoke:i%4===0};});
+  const light=new THREE.PointLight(0xff651c,0,19,2);scene.add(light);let blastAge=10,blastX=0,blastY=0,blastZ=0;
+  const shell=new THREE.Mesh(new THREE.SphereGeometry(1,32,20),new THREE.ShaderMaterial({uniforms:{age:{value:1}},transparent:true,depthWrite:false,side:THREE.DoubleSide,vertexShader:'varying vec3 vNormal;varying vec3 vPosition;uniform float age;void main(){vNormal=normal;vPosition=position;float ripple=sin(position.x*13.+age*11.)*sin(position.y*9.-age*8.)*.08;gl_Position=projectionMatrix*modelViewMatrix*vec4(position*(1.+ripple),1.);}',fragmentShader:'varying vec3 vNormal;varying vec3 vPosition;uniform float age;void main(){float n=sin(vPosition.x*18.-age*8.)*sin(vPosition.z*14.+age*11.)*.5+.5;float fade=1.-smoothstep(.1,.65,age);vec3 c=mix(vec3(.8,.065,.003),vec3(1.,.38,.025),n);gl_FragColor=vec4(c,fade*(.08+n*.22));}'}));shell.visible=false;scene.add(shell);
+  function explode(x,y,z){blastAge=0;blastX=x;blastY=y;blastZ=z;light.position.set(x,y+2,z);shell.position.set(x,y+.35,z);for(const f of flames){f.life=f.maxLife=f.smoke?1.6+Math.random()*.5:.65+Math.random()*.55;f.angle=f.i/flames.length*Math.PI*2+Math.random()*.2;f.radius=4+Math.random()*7.5;f.size=1.25+Math.random()*1.4;f.mesh.visible=true;}shell.visible=true;}
+  function resetTrail(){samples.length=0;geometry.setDrawRange(0,0);}
+  function update(dt,time,camera,player,attack,enabled){
+    if(dt>0){samples.forEach(s=>s.life-=dt);while(samples.length&&samples[0].life<=0)samples.shift();
+      const progress=attack?1-player.attackTime/player.attackDuration:0;
+      if(attack&&!attack.air&&avatar.sword.visible&&progress>.24&&progress<.66){avatar.g.updateMatrixWorld(true);samples.push({a:avatar.sword.localToWorld(new THREE.Vector3(0,.32,0)),b:avatar.sword.localToWorld(new THREE.Vector3(0,2.05,0)),life:.18});if(samples.length>maxSamples)samples.shift();}
+    }
+    let v=0;const tint=color(attack?.heavy?0xffbc64:0x78dce8);
+    for(let i=1;i<samples.length;i++){const a=samples[i-1],b=samples[i];for(const [point,life]of [[a.a,a.life],[a.b,a.life],[b.b,b.life],[a.a,a.life],[b.b,b.life],[b.a,b.life]]){positions.set([point.x,point.y,point.z],v*3);const fade=Math.max(0,life/.18);colors.set([tint.r*fade,tint.g*fade,tint.b*fade],v*3);v++;}}geometry.setDrawRange(0,v);geometry.attributes.position.needsUpdate=true;geometry.attributes.color.needsUpdate=true;
+    ghostTimer-=dt;if(dt>0&&enabled&&player.dashTime>0&&ghostTimer<=0){avatar.g.updateMatrixWorld(true);const g=ghosts[ghostIndex++%ghosts.length];sources.forEach((o,i)=>{g.meshes[i].matrix.copy(o.matrixWorld);let visible=true;for(let ancestor=o;ancestor;ancestor=ancestor.parent)if(!ancestor.visible)visible=false;g.meshes[i].visible=visible;});g.life=.23;g.group.visible=true;ghostTimer=.055;}
+    for(const g of ghosts){g.life=Math.max(0,g.life-dt);g.mat.opacity=.19*g.life/.23;g.group.visible=g.life>0&&enabled;}
+    blastAge+=dt;light.intensity=Math.max(0,1-blastAge/.65)*1.6;shell.visible=blastAge<.65;shell.material.uniforms.age.value=blastAge;shell.scale.set(1+blastAge*18,.75+blastAge*5,1+blastAge*18);
+    for(const f of flames){f.life=Math.max(0,f.life-dt);f.mesh.visible=f.life>0;if(!f.life)continue;const p=1-f.life/f.maxLife,r=f.radius*(1-Math.pow(1-p,3));f.mat.uniforms.age.value=p;f.mesh.position.set(blastX+Math.cos(f.angle)*r,blastY+.5+p*(f.smoke?5:2.2),blastZ+Math.sin(f.angle)*r);f.mesh.quaternion.copy(camera.quaternion);const size=f.size*(.35+p*(f.smoke?2:1.4));f.mesh.scale.set(size,size*(f.smoke?1:1.65),size);}
+  }
+  function clear(){resetTrail();for(const g of ghosts){g.life=0;g.group.visible=false;}for(const f of flames){f.life=0;f.mesh.visible=false;}blastAge=10;light.intensity=0;shell.visible=false;}
+  return {update,explode,resetTrail,clear,ribbon,ghosts,flames};
+});
